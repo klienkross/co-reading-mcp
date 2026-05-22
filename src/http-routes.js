@@ -3,6 +3,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import {
   annotatePassage,
+  continueReading,
   getProgress,
   listAnnotations,
   listBooks,
@@ -72,6 +73,10 @@ export async function handleApi(req, res, url, options = {}) {
 
   if (req.method === "GET" && parts.length === 5 && parts[1] === "books" && parts[3] === "chunks") {
     return sendJson(res, 200, await readChunk(parts[2], parts[4]));
+  }
+
+  if (req.method === "GET" && parts.length === 2 && parts[1] === "continue") {
+    return sendJson(res, 200, await continueReading({ bookId: url.searchParams.get("bookId") || undefined }));
   }
 
   if (req.method === "GET" && parts.length === 2 && parts[1] === "annotations") {

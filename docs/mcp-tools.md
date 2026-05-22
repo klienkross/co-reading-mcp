@@ -24,6 +24,18 @@ Input:
 
 Returns the chunk text plus neighboring ids.
 
+## `reading_continue`
+
+Input:
+
+```json
+{ "bookId": "anthropic-guidelines" }
+```
+
+`bookId` is optional. When omitted, the server uses the most recently read book.
+
+Returns the next unread chunk after `lastChunkId`. If `lastChunkId` is missing or stale, it falls back to the first unread chunk. If the book is already complete, it returns `completed: true` and a progress summary instead of chunk text.
+
 ## `reading_search_chunks`
 
 Input:
@@ -122,7 +134,7 @@ Input:
 }
 ```
 
-Writes one JSONL annotation. If the quote is present in the chunk, the returned object includes a `quoteOffset`.
+Writes one JSONL annotation. If the quote is present in the chunk, the returned object includes a `quoteOffset`. Root annotations also return `annotationIndexInBook`, `annotationIndexInChunk`, and a short `message` such as “Saved annotation 12 in this book.”
 
 For a user-facing reading app, create user notes with:
 
@@ -195,7 +207,20 @@ Input:
 { "bookId": "anthropic-guidelines", "chunkId": "ch00" }
 ```
 
-Marks a chunk as read and updates `lastChunkId`.
+Marks a chunk as read and updates `lastChunkId`. The response includes `chunksRead`, `chunkCount`, `complete`, and a human-readable `message`.
+
+When the marked chunk completes the book, the response also includes:
+
+```json
+{
+  "finish": {
+    "annotationCount": 32,
+    "moodCounts": { "quiet": 4 },
+    "kindCounts": { "resonance": 12, "feeling": 5 },
+    "message": "Congratulations, Book Title is complete: 43/43 chunks, 32 annotations."
+  }
+}
+```
 
 ## `reading_get_progress`
 

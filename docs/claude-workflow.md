@@ -11,7 +11,9 @@ This is the intended agent loop.
 
 ## Continue Reading
 
-After `reading_read_chunk`, use `nextId` from the result. Claude does not need to call `reading_list_chunks` again unless it wants the table of contents.
+Call `reading_continue` to resume smoothly. With a `bookId`, it returns the next unread chunk for that book. Without a `bookId`, it uses the most recently read book.
+
+After `reading_read_chunk`, Claude can still use `nextId` from the result for tight page-turning. It does not need to call `reading_list_chunks` again unless it wants the table of contents.
 
 ## Leave a Margin Note
 
@@ -88,6 +90,8 @@ When done with a chunk, call:
 ```
 
 with `reading_mark_read`.
+
+If this completes the final chunk, `reading_mark_read` returns a small finish summary with chunk count, annotation count, and mood/kind counts. Use that as a closing ritual for the reading session.
 
 ## Search
 

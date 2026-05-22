@@ -5,6 +5,7 @@ A local MCP server that gives Claude a durable reading room:
 - import EPUB or plain text into stable chunks while preserving EPUB spine/chapter boundaries
 - list books and chunks
 - read chunk-by-chunk with `prevId` / `nextId`
+- continue directly from the next unread chunk
 - search across a book with cached chunk text
 - write margin annotations
 - stage user notes, submit them to Claude once, and attach Claude replies under them
@@ -176,6 +177,7 @@ data/
 - `reading_list_books`
 - `reading_list_chunks`
 - `reading_read_chunk`
+- `reading_continue`
 - `reading_search_chunks`
 - `reading_import_book`
 - `reading_import_begin`
@@ -199,8 +201,10 @@ The bundled reader is intentionally small: it is a reference UI, not a required 
 - `GET /api/books`
 - `GET /api/books/:bookId/chunks`
 - `GET /api/books/:bookId/chunks/:chunkId`
+- `GET /api/continue?bookId=...`
 - `GET /api/annotations?bookId=...&chunkId=...`
 - `POST /api/annotations`
+- `POST /api/replies`
 - `POST /api/submit-notes`
 - `POST /api/mark-read`
 - `GET /api/search?q=...&bookId=...`

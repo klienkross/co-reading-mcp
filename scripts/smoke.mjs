@@ -159,6 +159,26 @@ await writeFile(
   })}\n`,
   "utf8",
 );
+await writeFile(
+  path.join(tempDataDir, "progress.json"),
+  `${JSON.stringify(
+    {
+      "demo-book": {
+        lastChunkId: "ch00",
+        lastReadAt: "2026-05-22T00:00:00.000Z",
+        readChunkIds: ["ch00"],
+      },
+      "anthropic-guidelines": {
+        lastChunkId: "ch00",
+        lastReadAt: "2026-05-22T00:00:01.000Z",
+        readChunkIds: ["ch00", "missing-old-chunk"],
+      },
+    },
+    null,
+    2,
+  )}\n`,
+  "utf8",
+);
 
 const server = spawn(process.execPath, [path.join(root, "src/server.js")], {
   env: {
@@ -206,6 +226,10 @@ const read = await request("tools/call", {
 const search = await request("tools/call", {
   name: "reading_search_chunks",
   arguments: { bookId: "anthropic-guidelines", query: "values" },
+});
+const continueAnthropic = await request("tools/call", {
+  name: "reading_continue",
+  arguments: { bookId: "anthropic-guidelines" },
 });
 const importText = [
   "Chapter Alpha",
@@ -267,6 +291,14 @@ const chunkedPartB = await request("tools/call", {
 const chunkedFinish = await request("tools/call", {
   name: "reading_import_finish",
   arguments: { uploadId: chunkedUploadId },
+});
+const markImportFirst = await request("tools/call", {
+  name: "reading_mark_read",
+  arguments: { bookId: "mcp-import", chunkId: "ch00" },
+});
+const markImportDone = await request("tools/call", {
+  name: "reading_mark_read",
+  arguments: { bookId: "mcp-import", chunkId: "ch01" },
 });
 const badImportBookId = await request("tools/call", {
   name: "reading_import_book",
@@ -525,11 +557,17 @@ await rm(tempDataDir, { recursive: true, force: true });
 if (!list.result?.content?.[0]?.text.includes("anthropic-guidelines")) {
   throw new Error("reading_list_books did not return anthropic-guidelines");
 }
+if (contentJson(list).find((book) => book.bookId === "anthropic-guidelines")?.chunksRead !== 1) {
+  throw new Error("reading_list_books counted stale progress chunk ids");
+}
 if (!read.result?.content?.[0]?.text.includes("Claude and the mission of Anthropic")) {
   throw new Error("reading_read_chunk did not return chunk text");
 }
 if (!search.result?.content?.[0]?.text.includes("values")) {
   throw new Error("reading_search_chunks did not return a values snippet");
+}
+if (contentJson(continueAnthropic).chunk.id !== "ch01") {
+  throw new Error("reading_continue did not return the next unread chunk");
 }
 if (contentJson(mcpImport).bookId !== "mcp-import" || contentJson(mcpImport).chunkCount !== 2) {
   throw new Error("reading_import_book did not import TXT headings");
@@ -543,6 +581,12 @@ if (contentJson(chunkedPartA).parts !== 1 || contentJson(chunkedPartB).parts !==
 if (contentJson(chunkedFinish).bookId !== "chunked-import" || contentJson(chunkedFinish).chunkCount !== 2) {
   throw new Error("reading_import_finish did not import chunked TXT upload");
 }
+if (contentJson(markImportFirst).complete !== false) {
+  throw new Error("reading_mark_read marked a partial book complete");
+}
+if (contentJson(markImportDone).complete !== true || !contentJson(markImportDone).finish?.message.includes("complete")) {
+  throw new Error("reading_mark_read did not return a finish ceremony for the final chunk");
+}
 if (!badImportBookId.error?.message.includes("bookId may only contain")) {
   throw new Error("reading_import_book did not reject unsafe bookId");
 }
@@ -554,6 +598,9 @@ if (!contentJson(firstSubmit).context.chunks[0]?.text.includes("Claude and the m
 }
 if (!contentJson(sameSessionNote).id) {
   throw new Error("reading_annotate_passage did not create the same-session user note");
+}
+if (!contentJson(sameSessionNote).annotationIndexInBook || !contentJson(sameSessionNote).message.includes("Saved annotation")) {
+  throw new Error("reading_annotate_passage did not return annotation index feedback");
 }
 if (contentJson(sameSessionSubmit).context.chunks.length !== 0) {
   throw new Error("same-session submit repeated chunk text");

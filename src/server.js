@@ -3,6 +3,7 @@ import readline from "node:readline";
 import { fileURLToPath } from "node:url";
 import {
   annotatePassage,
+  continueReading,
   dataDir,
   getProgress,
   listAnnotations,
@@ -56,6 +57,17 @@ export const tools = [
       additionalProperties: false,
     },
     annotations: { title: "Read Chunk", readOnlyHint: true },
+  },
+  {
+    name: "reading_continue",
+    description:
+      "Continue reading from the next unread chunk. If bookId is omitted, use the most recently read book.",
+    inputSchema: {
+      type: "object",
+      properties: { bookId: { type: "string" } },
+      additionalProperties: false,
+    },
+    annotations: { title: "Continue Reading", readOnlyHint: true },
   },
   {
     name: "reading_search_chunks",
@@ -286,6 +298,8 @@ export async function callTool(name, args = {}) {
       return textContent(await listChunks(args.bookId));
     case "reading_read_chunk":
       return textContent(await readChunk(args.bookId, args.chunkId));
+    case "reading_continue":
+      return textContent(await continueReading(args));
     case "reading_search_chunks":
       return textContent(await searchChunks(args));
     case "reading_import_book":
@@ -325,7 +339,7 @@ export async function handle(message) {
       capabilities: { tools: {} },
       instructions:
         `Use this server as a shared co-reading surface. ` +
-        `Claude can import EPUB/TXT uploads, read chunked books, search passages, track progress, leave margin annotations, ` +
+        `Claude can import EPUB/TXT uploads, continue reading, read chunked books, search passages, track progress, leave margin annotations, ` +
         `reply under user notes, and call reading_submit_user_notes when the human sends staged notes. ` +
         `Use reading_import_book for small uploads, or reading_import_begin/part/finish for large files. ` +
         `If this server is running through src/server-sse.js, the same process can also serve the human reader at /, REST API at /api/*, SSE MCP at /sse, and JSON-RPC POST at /mcp. ` +

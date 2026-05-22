@@ -81,6 +81,27 @@ function asArray(value) {
   return Array.isArray(value) ? value : [];
 }
 
+function sortedChunks(manifest) {
+  return manifest.chunks.slice().sort((a, b) => a.order - b.order);
+}
+
+function validReadIds(manifest, progressEntry = {}) {
+  const chunkIds = new Set(manifest.chunks.map((chunk) => chunk.id));
+  return new Set(asArray(progressEntry.readChunkIds).filter((chunkId) => chunkIds.has(chunkId)));
+}
+
+function progressSummary(manifest, progressEntry = {}) {
+  const readIds = validReadIds(manifest, progressEntry);
+  return {
+    lastChunkId: manifest.chunks.some((chunk) => chunk.id === progressEntry.lastChunkId) ? progressEntry.lastChunkId : null,
+    lastReadAt: progressEntry.lastReadAt || null,
+    readChunkIds: Array.from(readIds),
+    chunksRead: readIds.size,
+    chunkCount: manifest.chunks.length,
+    complete: manifest.chunks.length > 0 && readIds.size === manifest.chunks.length,
+  };
+}
+
 export async function loadManifest(bookId) {
   const manifestPath = resolveInside(booksDir, bookId, "manifest.json");
   const signature = await fileSignature(manifestPath);
@@ -133,17 +154,18 @@ export async function listBooks() {
     if (!entry.isDirectory()) continue;
     try {
       const manifest = await loadManifest(entry.name);
-      const readIds = new Set(progress[manifest.bookId]?.readChunkIds || []);
+      const summary = progressSummary(manifest, progress[manifest.bookId] || {});
       books.push({
         bookId: manifest.bookId,
         title: manifest.title,
         author: manifest.author || null,
         language: manifest.language || null,
         chunkCount: manifest.chunks.length,
-        chunksRead: readIds.size,
+        chunksRead: summary.chunksRead,
         annotationCount: annotations.bookCounts.get(manifest.bookId) || 0,
-        lastChunkId: progress[manifest.bookId]?.lastChunkId || null,
-        lastReadAt: progress[manifest.bookId]?.lastReadAt || null,
+        lastChunkId: summary.lastChunkId,
+        lastReadAt: summary.lastReadAt,
+        complete: summary.complete,
       });
     } catch {
       // Ignore broken book folders, but keep the server usable.
@@ -155,17 +177,14 @@ export async function listBooks() {
 export async function listChunks(bookId) {
   const manifest = await loadManifest(bookId);
   const progress = await loadProgress();
-  const readIds = new Set(progress[bookId]?.readChunkIds || []);
+  const readIds = validReadIds(manifest, progress[bookId] || {});
   const annotations = await annotationSummary();
 
-  return manifest.chunks
-    .slice()
-    .sort((a, b) => a.order - b.order)
-    .map((chunk) => ({
-      ...chunk,
-      read: readIds.has(chunk.id),
-      annotationCount: annotations.chunkCounts.get(chunkContextKey(bookId, chunk.id)) || 0,
-    }));
+  return sortedChunks(manifest).map((chunk) => ({
+    ...chunk,
+    read: readIds.has(chunk.id),
+    annotationCount: annotations.chunkCounts.get(chunkContextKey(bookId, chunk.id)) || 0,
+  }));
 }
 
 export async function readChunk(bookId, chunkId) {
@@ -189,6 +208,60 @@ export async function readChunk(bookId, chunkId) {
     prevId: chunk.prevId ?? null,
     nextId: chunk.nextId ?? null,
     text,
+  };
+}
+
+async function resolveContinueBook(bookId) {
+  if (bookId) return loadManifest(bookId);
+
+  const books = await listBooks();
+  const candidates = books
+    .filter((book) => book.lastReadAt)
+    .sort((a, b) => new Date(b.lastReadAt).getTime() - new Date(a.lastReadAt).getTime());
+  const selected = candidates[0] || books[0];
+  if (!selected) throw new Error("No books imported yet");
+  return loadManifest(selected.bookId);
+}
+
+function nextChunkForProgress(manifest, progressEntry = {}) {
+  const chunks = sortedChunks(manifest);
+  const readIds = validReadIds(manifest, progressEntry);
+  const lastIndex = chunks.findIndex((chunk) => chunk.id === progressEntry.lastChunkId);
+  if (lastIndex >= 0) {
+    const afterLast = chunks.slice(lastIndex + 1).find((chunk) => !readIds.has(chunk.id));
+    if (afterLast) return { chunk: afterLast, reason: "after-last-read" };
+  }
+
+  const firstUnread = chunks.find((chunk) => !readIds.has(chunk.id));
+  if (firstUnread) return { chunk: firstUnread, reason: lastIndex >= 0 ? "first-unread" : "first-unread-no-last" };
+
+  return { chunk: null, reason: "complete" };
+}
+
+export async function continueReading({ bookId } = {}) {
+  const manifest = await resolveContinueBook(bookId);
+  const progress = await loadProgress();
+  const summary = progressSummary(manifest, progress[manifest.bookId] || {});
+  const selection = nextChunkForProgress(manifest, progress[manifest.bookId] || {});
+
+  if (!selection.chunk) {
+    return {
+      bookId: manifest.bookId,
+      title: manifest.title,
+      author: manifest.author || null,
+      progress: summary,
+      completed: true,
+      message: `Already finished ${manifest.title}: ${summary.chunksRead}/${summary.chunkCount} chunks read.`,
+    };
+  }
+
+  const chunk = await readChunk(manifest.bookId, selection.chunk.id);
+  return {
+    ...chunk,
+    progress: summary,
+    selectedReason: selection.reason,
+    completed: false,
+    message: `Continue ${manifest.title} at ${selection.chunk.title} (${summary.chunksRead}/${summary.chunkCount} read).`,
   };
 }
 
@@ -328,12 +401,13 @@ async function buildSubmissionContext(notes, options = {}) {
 export async function markRead(bookId, chunkId) {
   return withWriteLock(async () => {
     const manifest = await loadManifest(bookId);
-    if (!manifest.chunks.some((chunk) => chunk.id === chunkId)) {
+    const targetChunk = manifest.chunks.find((chunk) => chunk.id === chunkId);
+    if (!targetChunk) {
       throw new Error(`Unknown chunkId for ${bookId}: ${chunkId}`);
     }
     const progress = await loadProgress();
     const current = progress[bookId] || {};
-    const readIds = new Set(current.readChunkIds || []);
+    const readIds = validReadIds(manifest, current);
     readIds.add(chunkId);
     progress[bookId] = {
       lastChunkId: chunkId,
@@ -341,8 +415,43 @@ export async function markRead(bookId, chunkId) {
       readChunkIds: Array.from(readIds),
     };
     await writeJson(progressPath, progress);
-    return progress[bookId];
+    const summary = progressSummary(manifest, progress[bookId]);
+    const result = {
+      ...progress[bookId],
+      bookId,
+      title: manifest.title,
+      chunkTitle: targetChunk.title,
+      chunksRead: summary.chunksRead,
+      chunkCount: summary.chunkCount,
+      complete: summary.complete,
+      message: summary.complete
+        ? `Finished ${manifest.title}: ${summary.chunksRead}/${summary.chunkCount} chunks read.`
+        : `Marked ${targetChunk.title} read (${summary.chunksRead}/${summary.chunkCount}).`,
+    };
+
+    if (summary.complete) {
+      const annotations = (await readAllAnnotations()).filter(
+        (annotation) => annotation.bookId === bookId && !annotation.parentId,
+      );
+      const moodCounts = countBy(annotations.map((annotation) => annotation.mood).filter(Boolean));
+      const kindCounts = countBy(annotations.map((annotation) => annotation.kind || "annotation"));
+      result.finish = {
+        annotationCount: annotations.length,
+        moodCounts,
+        kindCounts,
+        message: `Congratulations, ${manifest.title} is complete: ${summary.chunkCount}/${summary.chunkCount} chunks, ${annotations.length} annotations.`,
+      };
+    }
+
+    return result;
   });
+}
+
+function countBy(values) {
+  return values.reduce((counts, value) => {
+    counts[value] = (counts[value] || 0) + 1;
+    return counts;
+  }, {});
 }
 
 async function readAllAnnotations() {
@@ -389,6 +498,18 @@ export async function annotatePassage(input) {
     const chunk = await readChunk(bookId, chunkId);
     const quoteOffset = chunk.text.indexOf(quote);
     const author = input.author || "claude";
+    const parentId = input.parentId || null;
+    const existingAnnotations = await readAllAnnotations();
+    const rootAnnotations = existingAnnotations.filter((annotation) => !annotation.parentId);
+    const annotationIndexInBook = parentId
+      ? null
+      : rootAnnotations.filter((annotation) => annotation.bookId === bookId).length + 1;
+    const annotationIndexInChunk = parentId
+      ? null
+      : rootAnnotations.filter((annotation) => annotation.bookId === bookId && annotation.chunkId === chunkId).length + 1;
+    const replyIndex = parentId
+      ? existingAnnotations.filter((annotation) => annotation.parentId === parentId).length + 1
+      : null;
     const annotation = {
       id: `ann_${Date.now()}_${crypto.randomBytes(4).toString("hex")}`,
       bookId,
@@ -400,12 +521,18 @@ export async function annotatePassage(input) {
       mood: input.mood || null,
       tags: Array.isArray(input.tags) ? input.tags : [],
       status: input.status || (author === "user" ? "open" : "published"),
-      parentId: input.parentId || null,
+      parentId,
       quoteOffset: quoteOffset >= 0 ? quoteOffset : null,
       prevId: chunk.prevId,
       nextId: chunk.nextId,
+      annotationIndexInBook,
+      annotationIndexInChunk,
+      replyIndex,
       createdAt: new Date().toISOString(),
     };
+    annotation.message = parentId
+      ? `Saved reply ${replyIndex} under annotation ${parentId}.`
+      : `Saved annotation ${annotationIndexInBook} in this book (${annotationIndexInChunk} in this chunk).`;
 
     await mkdir(dataDir, { recursive: true });
     await appendFile(annotationsPath, `${JSON.stringify(annotation)}\n`, "utf8");
