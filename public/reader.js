@@ -621,7 +621,12 @@ $("import-file").addEventListener("change", async (event) => {
 });
 
 function showError(error) {
-  $("status").textContent = error.message || String(error);
+  const msg = error.message || String(error);
+  $("status").textContent = msg;
+  const toast = $("toast");
+  toast.textContent = msg;
+  toast.hidden = false;
+  toast.onclick = () => { toast.hidden = true; };
 }
 
 loadBooks().catch(showError);
