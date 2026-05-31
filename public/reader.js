@@ -517,7 +517,7 @@ $("note-selection").addEventListener("click", () => {
 });
 
 $("margins").addEventListener("click", (event) => {
-  if (event.target.closest("textarea, button")) return;
+  if (event.target.closest("textarea, button, .reply-form, .thread")) return;
   const card = event.target.closest(".note-card[data-note-id]");
   if (card) activateAnnotation(card.dataset.noteId);
 });
@@ -526,9 +526,11 @@ $("margins").addEventListener("submit", async (event) => {
   const form = event.target.closest(".reply-form");
   if (!form) return;
   event.preventDefault();
+  event.stopPropagation();
   const textarea = form.querySelector("textarea");
   const note = textarea.value.trim();
   if (!note) return;
+  const savedNoteId = state.activeAnnotationId;
   await api("/api/replies", {
     method: "POST",
     body: {
@@ -539,7 +541,9 @@ $("margins").addEventListener("submit", async (event) => {
     },
   });
   textarea.value = "";
+  state.activeAnnotationId = savedNoteId;
   await refreshCurrent();
+  if (savedNoteId) activateAnnotation(savedNoteId);
 });
 
 $("submit-notes").addEventListener("click", async () => {
