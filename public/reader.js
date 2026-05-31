@@ -49,6 +49,16 @@ function escapeHtml(value) {
     .replaceAll("'", "&#039;");
 }
 
+/** Light Markdown-ish formatting for annotation bodies (zero dependencies). */
+function formatNote(value) {
+  return escapeHtml(value)
+    .replace(/\*\*(.+?)\*\*/g, "<strong>$1</strong>")
+    .replace(/\*(.+?)\*/g, "<em>$1</em>")
+    .replace(/`(.+?)`/g, "<code>$1</code>")
+    .replace(/\n{2,}/g, "</p><p>")
+    .replace(/\n/g, "<br>");
+}
+
 function fileToBase64(file) {
   return new Promise((resolve, reject) => {
     const reader = new FileReader();
@@ -100,7 +110,7 @@ function replyClass(reply, root) {
 
 function renderReply(reply, root) {
   return `<div class="${replyClass(reply, root)}">
-    <p class="reply-body">${escapeHtml(reply.note)}</p>
+    <p class="reply-body">${formatNote(reply.note)}</p>
     <div class="note-meta">${escapeHtml(formatIdentity(reply.author))} · ${escapeHtml(reply.kind || "reply")}</div>
   </div>`;
 }
@@ -119,7 +129,7 @@ function renderThread(note, notes) {
 function renderInlineNote(note, notes) {
   return `<aside class="inline-note" data-note-id="${escapeHtml(note.id)}">
     <p class="inline-note-kicker">${escapeHtml(formatIdentity(note.author))} · ${escapeHtml(note.kind || "note")}</p>
-    <p class="note-body">${escapeHtml(note.note)}</p>
+    <p class="note-body">${formatNote(note.note)}</p>
     ${renderThread(note, notes)}
   </aside>`;
 }
@@ -204,7 +214,7 @@ function renderAnnotations() {
       return `<article class="note-card ${(note.status || "") === "open" ? "open" : ""} ${expanded ? "active" : ""}" data-note-id="${escapeHtml(note.id)}" tabindex="0">
         ${isShared ? `<p class="shared-line">这里有两个人的折痕。</p>` : ""}
         <p class="note-quote">${escapeHtml(note.quote)}</p>
-        <p class="note-body">${escapeHtml(note.note)}</p>
+        <p class="note-body">${formatNote(note.note)}</p>
         <div class="note-meta">${escapeHtml(formatIdentity(note.author))} · ${escapeHtml(note.kind || "note")} · ${escapeHtml(note.status || "published")}${replies.length ? ` · ${replies.length} replies` : ""}</div>
         ${
           expanded
